@@ -2,17 +2,17 @@
   "servers":
   [
       {
-        "name" : "rucio-server-torino",
-        "url": "https://rucio-server",
-        "account" : "root",
-        "username": "ddmlab",
+        "name" : "rucio-ET",
+        "url": "https://et-rucio-server.to.infn.it:443",
+        "account" : "mjansson",
+        "username": "mjansson",
         "password": "secret"
       },
       {
-        "name": "rucio-server-ligo",
-        "url": "https://rucio-server",
-        "account" : "root",
-        "username": "ddmlab",
+        "name": "rucio-CE",
+        "url": "https://et-rucio-server.to.infn.it:8443",
+        "account" : "mjansson",
+        "username": "mjansson",
         "password": "secret"
       }
   ]

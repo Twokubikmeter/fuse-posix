@@ -192,6 +192,7 @@ static int rucio_read(const char *path, char *buffer, size_t size, off_t offset,
     std::string cache_path = cache_root + "/" + extract_name(path);
 
     // Check if file has been downloaded already and cached
+    // TODO: MAJN: Make sure to see if the file needs to be reloaded. 
     if(not rucio_download_cache.is_cached(cache_path)) {
 
       auto ctx = fuse_get_context();

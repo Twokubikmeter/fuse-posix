@@ -300,7 +300,10 @@ std::vector<rucio_did> rucio_list_container_dids(const std::string& scope, const
   auto conn_params = get_server_params(short_server_name);
   auto key = short_server_name+scope+container_name;
   auto found = container_dids_cache.find(key);
-  if(found == container_dids_cache.end()) {
+  time_t time_now;
+  time(&time_now);
+  int chache_duration = 86400;
+  if(found == container_dids_cache.end() || found->second.first < time_now ) {
 
     auto headers = get_auth_headers(short_server_name);
 
@@ -315,7 +318,7 @@ std::vector<rucio_did> rucio_list_container_dids(const std::string& scope, const
             headers);
     if(curl_res.res != CURLE_OK){
       fastlog(ERROR, "Container: Curl error. Abort.");
-      return {};
+      return {};  
     }
 
 
@@ -334,11 +337,11 @@ std::vector<rucio_did> rucio_list_container_dids(const std::string& scope, const
               (is_container_cache[short_server_name+scope+did.name])?"true":"false");
     }
 
-    container_dids_cache[key] = std::move(dids);
-    return container_dids_cache[key];
+    container_dids_cache[key] = std::pair(time_now + chache_duration, std::move(dids));
+    return container_dids_cache[key].second;
   } else {
     fastlog(DEBUG,"USING CACHE");
-    return found->second;
+    return found->second.second;
   }
 }
 

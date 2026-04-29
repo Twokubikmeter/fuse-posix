@@ -28,6 +28,7 @@ Authors:
 enum auth_mode{
     userpass,
     x509,
+    oidc, 
     none
 };
 
@@ -124,6 +125,7 @@ std::string*  get_server_config(const std::string& server_name);
 // Methods to retrieve authentication information
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 curlx509Bundle* get_server_SSL_bundle(const std::string& server_name);
+curlOIDCBundle* get_server_OIDC_bundle(const std::string& server_name);
 token_info* get_server_token(const std::string& server_name);
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////

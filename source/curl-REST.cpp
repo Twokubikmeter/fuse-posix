@@ -28,7 +28,7 @@ curlRet GET(const std::string& url, const std::string& ca_path, const struct cur
     auto static_curl = curlWrap();
 
     fastlog(INFO, "GET %s", url.data());
-    fastlog(DEBUG, "CA path %s", ca_path.data());
+    fastlog(INFO, "CA path %s", ca_path.data());
 
     curl_easy_setopt(static_curl(), CURLOPT_URL, url.data());
     curl_easy_setopt(static_curl(), CURLOPT_CUSTOMREQUEST, "GET");
@@ -48,7 +48,7 @@ curlRet GET(const std::string& url, const std::string& ca_path, const struct cur
 
     curl_easy_setopt(static_curl(), CURLOPT_WRITEFUNCTION, curl_append_string_to_vect_callback);
     curl_easy_setopt(static_curl(), CURLOPT_WRITEDATA, &ret.payload);
-    curl_easy_setopt(static_curl(), CURLOPT_VERBOSE, CURLOPT_FALSE); //remove this to disable verbose output
+    curl_easy_setopt(static_curl(), CURLOPT_VERBOSE, CURLOPT_TRUE); //remove this to disable verbose output
     curl_easy_setopt(static_curl(), CURLOPT_TIMEOUT, timeout);
 
     // Include reply headers in CURLOPT_WRITEFUNCTION
@@ -72,6 +72,29 @@ curlRet GET(const std::string& url, const std::string& ca_path, const struct cur
   }
 
   return ret;
+}
+
+#include <fstream>
+
+std::string GET_OIDC(curlOIDCBundle& bundle){
+  std::string command = "rucio --oidc-auto --verbose --config " + bundle.config_file + " whoami";
+  fastlog(INFO, "Executing: %s", command.data());
+  system(command.data());
+  auto filepath = bundle.auth_token_file_path;
+  std::ifstream file(filepath);
+  if (!file) {
+      fastlog(ERROR, "Failed to open file: %s",  filepath.data());
+  }
+
+  std::stringstream buffer;
+  buffer << file.rdbuf();
+  std::string token = buffer.str();
+  while (!token.empty() &&
+    (token.back() == '\n' || token.back() == '\r')) {
+    token.pop_back();
+  }
+  fastlog(DEBUG, "token: %s", token.data());
+  return token;
 }
 
 curlRet GET_x509(const std::string& url, curlx509Bundle& bundle, const struct curl_slist* headers, bool include_headers, long timeout){

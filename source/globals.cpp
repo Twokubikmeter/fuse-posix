@@ -24,6 +24,10 @@ auth_mode get_auth_mode(const std::string& settings_line){
     return auth_mode::x509;
   }
 
+  if (settings_line.rfind("oidc", 0) == 0) {
+    return auth_mode::oidc;
+  }
+
   return auth_mode::none;
 }
 
@@ -31,6 +35,7 @@ std::string get_auth_name(auth_mode mode){
   switch (mode){
     case userpass: return "userpass";
     case x509: return "x509";
+    case oidc: return "oidc";
     default: return "undefined";
   }
 }
@@ -61,6 +66,57 @@ std::string*  get_server_config(const std::string& server_name){
 std::string get_cfg_value(std::string& line){
   line.erase(std::remove(line.begin(), line.end(), ' '), line.end());
   return line.substr(line.find('=') + 1);
+}
+
+curlOIDCBundle* get_server_OIDC_bundle(const std::string& server_name){
+  if(not server_exists(server_name)) return nullptr;
+
+  auto bundle = new curlOIDCBundle;
+  bundle->config_file = rucio_server_map[server_name].config_file_path;
+
+  std::ifstream settings_file;
+  settings_file.open(rucio_server_map[server_name].config_file_path.data());
+
+  std::string line;
+  while (getline(settings_file, line)) {
+
+    if (line.rfind("oidc_issuer", 0) == 0) {
+      bundle->oidc_issuer = get_cfg_value(line);
+    }
+
+    if (line.rfind("oidc_scope", 0) == 0) {
+      bundle->oidc_scope = get_cfg_value(line);
+    }
+
+    if (line.rfind("oidc_audience", 0) == 0) {
+      bundle->oidc_audience = get_cfg_value(line);
+    }
+
+    if (line.rfind("oidc_polling", 0) == 0) {
+      bundle->oidc_polling = get_cfg_value(line);
+    }
+
+    if (line.rfind("auth_oidc_refresh_activate", 0) == 0) {
+      bundle->oidc_polling = get_cfg_value(line);
+    }
+
+    if (line.rfind("auth_token_file_path", 0) == 0) {
+      bundle->auth_token_file_path = get_cfg_value(line);
+    }
+
+    if (line.rfind("oidc_username", 0) == 0) {
+      bundle->oidc_username = get_cfg_value(line);
+    }
+
+    if (line.rfind("oidc_password", 0) == 0) {
+      bundle->oidc_password = get_cfg_value(line);
+    }
+
+  }
+
+  settings_file.close();
+
+  return bundle;
 }
 
 curlx509Bundle* get_server_SSL_bundle(const std::string& server_name){
@@ -129,6 +185,7 @@ void parse_settings_cfg(std::string ruciofs_settings_root){
           settings_file.open(srv.config_file_path.data());
           std::string line;
           std::string ca_file_path;
+          std::string oidc_issuer, oidc_audience, oidc_scope, oidc_polling, auth_oidc_refresh_activate, auth_token_file_path;
           while (getline(settings_file, line)) {
             if (line.rfind("rucio_host", 0) == 0) {
               srv.rucio_conn_params.server_url = get_cfg_value(line);
@@ -152,6 +209,30 @@ void parse_settings_cfg(std::string ruciofs_settings_root){
 
             if (line.rfind("ca_cert", 0) == 0) {
               ca_file_path = get_cfg_value(line);
+            }
+
+            if (line.rfind("oidc_issuer", 0) == 0){
+              oidc_issuer = get_cfg_value(line);
+            }
+
+            if (line.rfind("oidc_audience", 0) == 0){
+              oidc_audience = get_cfg_value(line);
+            }
+
+            if (line.rfind("oidc_scope", 0) == 0){
+              oidc_scope = get_cfg_value(line);
+            }
+
+            if (line.rfind("oidc_polling", 0) == 0){
+              oidc_polling = get_cfg_value(line);
+            }
+
+            if (line.rfind("", 0) == 0){
+              auth_oidc_refresh_activate = get_cfg_value(line);
+            }
+
+            if (line.rfind("", 0) == 0){
+              auth_token_file_path = get_cfg_value(line);
             }
           }
 

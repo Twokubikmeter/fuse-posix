@@ -14,6 +14,7 @@ Authors:
 #include <utils.h>
 #include <iostream>
 #include <time.h>
+#include <nlohmann/json.hpp>
 
 using namespace fastlog;
 
@@ -40,6 +41,95 @@ bool rucio_validate_server(const std::string& short_server_name){
   return true;
 }
 
+
+// --- Base64 decoding table ---
+static const std::string base64_chars =
+    "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+    "abcdefghijklmnopqrstuvwxyz"
+    "0123456789+/";
+
+// --- Base64URL decode ---
+std::string base64url_decode(std::string input) {
+    // Convert URL-safe → standard Base64
+    std::replace(input.begin(), input.end(), '-', '+');
+    std::replace(input.begin(), input.end(), '_', '/');
+
+    // Add padding
+    while (input.size() % 4) input += '=';
+
+    std::string output;
+    std::vector<int> T(256, -1);
+    for (int i = 0; i < 64; i++) T[base64_chars[i]] = i;
+
+    int val = 0, valb = -8;
+    for (unsigned char c : input) {
+        if (T[c] == -1) break;
+        val = (val << 6) + T[c];
+        valb += 6;
+        if (valb >= 0) {
+            output.push_back(char((val >> valb) & 0xFF));
+            valb -= 8;
+        }
+    }
+
+    return output;
+}
+
+// --- Extract exp ---
+std::int64_t get_token_expiry(const std::string& jwt) {
+    auto first_dot = jwt.find('.');
+    auto second_dot = jwt.find('.', first_dot + 1);
+
+    if (first_dot == std::string::npos || second_dot == std::string::npos) {
+        throw std::runtime_error("Invalid JWT format");
+    }
+
+    std::string payload = jwt.substr(first_dot + 1, second_dot - first_dot - 1);
+    std::string decoded = base64url_decode(payload);
+
+    auto json = nlohmann::json::parse(decoded);
+    return json["exp"].get<std::int64_t>();
+}
+
+int rucio_get_auth_token_oidc(const std::string& short_server_name){  // TODO: better be done right
+  
+  auto conn_params = get_server_params(short_server_name);
+
+  if(not conn_params){
+    fastlog(ERROR,"Server %s not found. Aborting!", short_server_name.data());
+    return SERVER_NOT_LOADED;
+  }
+
+  curlOIDCBundle* bundle = get_server_OIDC_bundle(short_server_name);
+
+  auto token = GET_OIDC(*bundle);
+
+  auto token_info = get_server_token(short_server_name);
+
+  if(not token_info){
+    fastlog(ERROR,"Server %s didn't provide token. Aborting!", short_server_name.data());
+    return TOKEN_ERROR;
+  }
+
+  long exp = get_token_expiry(token);
+  char localTimeString[80];
+  char utcTimeString[80];
+  strftime(localTimeString, sizeof(localTimeString), "%a %Y-%m-%d %H:%M:%S %Z", localtime(&exp));
+  strftime(utcTimeString, sizeof(utcTimeString), "%a %Y-%m-%d %H:%M:%S %Z", gmtime(&exp));
+
+  fastlog(INFO, "Fetched token for %s", short_server_name.data());
+  fastlog(INFO,"Expiration (epoch):  %i", exp);
+  fastlog(INFO,"Expiration (human):  %s", localTimeString);
+  fastlog(INFO,"Expiration UTC (human)  %s", utcTimeString);
+
+  token_info->conn_token = (strlen(token.data())>0) ? token : rucio_invalid_token;
+
+  token_info->conn_token_exp = *gmtime(&exp);
+  token_info->conn_token_exp_epoch = exp;
+
+  return TOKEN_OK;
+}
+
 int rucio_get_auth_token(const std::string& short_server_name){
 
   auto conn_params = get_server_params(short_server_name);
@@ -47,6 +137,7 @@ int rucio_get_auth_token(const std::string& short_server_name){
   switch (conn_params->rucio_auth_mode){
     case auth_mode::userpass: return rucio_get_auth_token_userpass(short_server_name);
     case auth_mode::x509: return rucio_get_auth_token_x509(short_server_name);
+    case auth_mode::oidc: return rucio_get_auth_token_oidc(short_server_name);
     default: return TOKEN_ERROR;
   }
 }
@@ -197,7 +288,18 @@ const std::vector<std::string>& rucio_list_servers(){
 
 std::vector<std::string> rucio_list_scopes(const std::string& short_server_name){
   auto found = scopes_cache.find(short_server_name);
-  if(found == scopes_cache.end()) {
+  time_t time_now;
+  time(&time_now);
+
+  fastlog(INFO, "Fetching %s", short_server_name.data());
+  if(found == scopes_cache.end()){
+    fastlog(DEBUG, "rucio_list_scopes: Not in cache");}
+  else if(found->second.first < time_now){
+    fastlog(DEBUG, "rucio_list_scopes: Timed out");}
+  else
+    fastlog(DEBUG, "rucio_list_scopes: Using cache");
+
+  if(found == scopes_cache.end() || found->second.first < time_now) {
     auto conn_params = get_server_params(short_server_name);
     auto token_info = get_server_token(short_server_name);
 
@@ -225,15 +327,17 @@ std::vector<std::string> rucio_list_scopes(const std::string& short_server_name)
 
     std::vector<std::string> scopes;
 
+    fastlog(DEBUG, "return value");
     for (auto &line : curl_res.payload) {
+      fastlog(DEBUG, "%s", line.data());
       tokenize_python_list(line, scopes);
     }
 
-    scopes_cache[short_server_name] = std::move(scopes);
-    return scopes_cache[short_server_name];
+    scopes_cache[short_server_name] = std::pair(time_now + chache_duration, std::move(scopes));
+    return scopes_cache[short_server_name].second;
   } else {
     fastlog(DEBUG,"USING CACHE");
-    return found->second;
+    return found->second.second;
   }
 }
 
@@ -261,7 +365,17 @@ std::vector<rucio_did> rucio_list_dids(const std::string& scope, const std::stri
   auto conn_params = get_server_params(short_server_name);
   auto key = short_server_name+scope;
   auto found = dids_cache.find(key);
-  if(found == dids_cache.end()) {
+  time_t time_now;
+  time(&time_now);
+  fastlog(INFO, "Fetching %s", key.data());
+  if(found == dids_cache.end()){
+    fastlog(DEBUG, "rucio_list_dids: Not in cache");}
+  else if(found->second.first < time_now){
+    fastlog(DEBUG, "rucio_list_dids: Timed out");}
+  else
+    fastlog(DEBUG, "rucio_list_dids: Using cache");
+
+  if(found == dids_cache.end() || found->second.first < time_now) {
     auto headers = get_auth_headers(short_server_name);
 
     if (not headers) {
@@ -280,19 +394,22 @@ std::vector<rucio_did> rucio_list_dids(const std::string& scope, const std::stri
 
     std::vector<rucio_did> dids;
 
+    fastlog(DEBUG, "return value:");
     for (auto &line : curl_res.payload) {
+      fastlog(DEBUG, "%s", line.data());
       structurize_did(line, dids);
     }
 
     for(const auto& did : dids){
       is_container_cache[short_server_name+scope+did.name] = did.type != rucio_data_type::rucio_file;
+      file_size_cache[short_server_name+scope+did.name] = did.size;
     }
 
-    dids_cache[key] = std::move(dids);
-    return dids_cache[key];
+    dids_cache[key] = std::pair(time_now + chache_duration, std::move(dids));
+    return dids_cache[key].second;
   } else {
-    fastlog(DEBUG,"USING CACHE");
-    return found->second;
+    fastlog(INFO,"USING CACHE");
+    return found->second.second;
   }
 }
 
@@ -302,7 +419,15 @@ std::vector<rucio_did> rucio_list_container_dids(const std::string& scope, const
   auto found = container_dids_cache.find(key);
   time_t time_now;
   time(&time_now);
-  int chache_duration = 86400;
+
+  fastlog(INFO, "Fetching %s", key.data());
+  if(found == container_dids_cache.end()){
+    fastlog(DEBUG, "rucio_list_container_dids: Not in cache");}
+  else if(found->second.first < time_now){
+    fastlog(DEBUG, "rucio_list_container_dids: Timed out");}
+  else
+    fastlog(DEBUG, "rucio_list_container_dids: Using cache");
+
   if(found == container_dids_cache.end() || found->second.first < time_now ) {
 
     auto headers = get_auth_headers(short_server_name);
@@ -443,7 +568,7 @@ off_t rucio_get_size(const std::string& path){
     return {};
   }
 
-  auto curl_res = safeGET(conn_params->server_url + "/dids/" + scope + "/" + name,
+  auto curl_res = safeGET(conn_params->server_url + "/dids/" + scope + "/" + name, // Dont do this. Call attachements instead
                       conn_params->ca_path,
                       headers);
   if(curl_res.res != CURLE_OK){

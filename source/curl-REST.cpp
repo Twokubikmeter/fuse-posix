@@ -74,29 +74,150 @@ curlRet GET(const std::string& url, const std::string& ca_path, const struct cur
   return ret;
 }
 
+
+#include <pwd.h>
+#include <grp.h>
+#include <unistd.h>
+#include <sys/wait.h>
+#include <string.h>
+
 #include <fstream>
 
-std::string GET_OIDC(curlOIDCBundle& bundle){
-  std::string command = "rucio --oidc-auto --verbose --config " + bundle.config_file + " whoami";
-  fastlog(INFO, "Executing: %s", command.data());
-  system(command.data());
-  auto filepath = bundle.auth_token_file_path;
-  std::ifstream file(filepath);
-  if (!file) {
-      fastlog(ERROR, "Failed to open file: %s",  filepath.data());
-  }
+#include <sys/ioctl.h>  
+#include <pty.h>
 
+#include "terminal-redirect.h"
+
+std::string GET_OIDC(curlOIDCBundle& bundle, uid_t uid, pid_t calling_pid, std::string username) {
+  fastlog(INFO, "Starting OIDC authentication for user %s (uid %d, pid %d)", 
+          username.c_str(), uid, calling_pid);
+  
+  int master_fd, slave_fd;
+  pid_t pid;
+  
+  // Create a pseudo-terminal
+  if (openpty(&master_fd, &slave_fd, nullptr, nullptr, nullptr) == -1) {
+    fastlog(ERROR, "Failed to openpty: %s", strerror(errno));
+    return "";
+  }
+  std::string command = "sudo -E -u " + username + " PATH=$PATH `which rucio` --config /home/jansson/fuse_rucio_cfgs/rucio_ET.cfg whoami";
+  fastlog(INFO, "Executing: %s", command.data());
+
+  pid = fork();
+  
+  if (pid == -1) {
+    fastlog(ERROR, "Failed to fork: %s", strerror(errno));
+    close(master_fd);
+    close(slave_fd);
+    return "";
+  }
+  
+  if (pid == 0) {
+    // Child process
+    close(master_fd);
+    
+    // Make the slave PTY the controlling terminal
+    setsid();
+    ioctl(slave_fd, TIOCSCTTY, 0);
+    
+    // Redirect stdin/stdout/stderr to the slave PTY
+    dup2(slave_fd, STDIN_FILENO);
+    dup2(slave_fd, STDOUT_FILENO);
+    dup2(slave_fd, STDERR_FILENO);
+    
+    if (slave_fd > STDERR_FILENO) {
+      close(slave_fd);
+    }
+    
+    struct passwd *pwd = getpwuid(uid);
+    if (!pwd) {
+      fastlog(ERROR, "User %d not found", uid);
+      exit(1);
+    }
+    
+    // Switch to target user
+    if (setgid(pwd->pw_gid) != 0) {
+      fastlog(ERROR, "Failed to setgid: %s", strerror(errno));
+      exit(1);
+    }
+    
+    if (setuid(uid) != 0) {
+      fastlog(ERROR, "Failed to setuid: %s", strerror(errno));
+      exit(1);
+    }
+
+    if (!getuid() == uid)
+    {
+      fastlog(ERROR, "User switch failed.");
+    }
+    
+    //setenv("HOME", pwd->pw_dir, 1);
+    
+    // Execute rucio
+    const char *argv[] = {
+      "/home/jansson/venv/rucio_venv/bin/rucio",
+      "--config",
+      bundle.config_file.c_str(),
+      "whoami",
+      nullptr
+    };
+    /*const char *argv[] = {
+      "sudo",  
+      "-E", 
+      "-u",
+      username.c_str(), 
+      "/home/jansson/venv/rucio_venv/bin/rucio", // TODO:once it works find the path
+      "--config", 
+      bundle.config_file.c_str(),
+      "whoami",
+      nullptr
+    };*/
+    //system(command.data());
+    execvp("/home/jansson/venv/rucio_venv/bin/rucio", (char * const *)argv);
+    // If execvp returns, there was an error  
+    fastlog(ERROR, "Failed to execute rucio: %s", strerror(errno));
+    exit(1);
+  } else {
+    // Parent process - relay PTY output to calling process
+    close(slave_fd);
+    
+    relay_pty_bidirectional(master_fd, calling_pid);
+    
+    int status;
+    waitpid(pid, &status, 0);
+    close(master_fd);
+    
+    if (!WIFEXITED(status) || WEXITSTATUS(status) != 0) {
+      fastlog(ERROR, "OIDC authentication failed for user %d", uid);
+      return "";
+    }
+    
+    fastlog(INFO, "OIDC authentication completed for user %d", uid);
+  }
+  
+  // Read token from user's location
+  std::string token_path = "/tmp/" + username + "/.rucio_" + username + "/auth_token_for_default_account";
+  fastlog(INFO, "Token path: %s", token_path.c_str());
+
+
+  std::ifstream file(token_path);
+  if (!file) {
+    fastlog(ERROR, "Failed to read token for user %d", uid);
+    return "";
+  }
+  
   std::stringstream buffer;
   buffer << file.rdbuf();
   std::string token = buffer.str();
-  while (!token.empty() &&
-    (token.back() == '\n' || token.back() == '\r')) {
+  
+  while (!token.empty() && 
+         (token.back() == '\n' || token.back() == '\r')) {
     token.pop_back();
   }
-  fastlog(DEBUG, "token: %s", token.data());
+  
   return token;
 }
-
+  
 curlRet GET_x509(const std::string& url, curlx509Bundle& bundle, const struct curl_slist* headers, bool include_headers, long timeout){
   curlRet ret;
   {

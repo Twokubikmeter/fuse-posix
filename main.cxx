@@ -22,6 +22,11 @@ int main( int argc, char *argv[] )
   operations.getattr = rucio_getattr;
   operations.readdir = rucio_readdir;
   operations.read	= rucio_read;
+  uid_t uid = getuid();
+  std::string username = getpwuid(uid)->pw_name;
+  pid_t calling_pid = getpid();
+  
+  std::cout << uid << " " << username << " " << calling_pid << std::endl; // TODO: Remove
 
   std::vector<std::string> argvect(argv, argv + argc);
 
@@ -40,10 +45,10 @@ int main( int argc, char *argv[] )
   }
 
   if(configOpt != argvect.end()) {
-    parse_settings_cfg(*(configOpt+1));
+    parse_settings_cfg(uid, calling_pid, username, *(configOpt+1));
     fastlog(INFO, "Using custom settings location: %s", (configOpt+1)->data());
   } else {
-    parse_settings_cfg();
+    parse_settings_cfg(uid, calling_pid, username);
 
     std::string ruciofs_settings_root = "./rucio-settings";
     if(getenv("RUCIOFS_SETTINGS_FILES_ROOT") != NULL){

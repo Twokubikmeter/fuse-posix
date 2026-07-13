@@ -94,15 +94,14 @@ std::string GET_OIDC(curlOIDCBundle& bundle, uid_t uid, pid_t calling_pid, std::
   
   int master_fd, slave_fd;
   pid_t pid;
-  
+  std::cout << "in GET_OIDC " << std::endl;
+
   // Create a pseudo-terminal
   if (openpty(&master_fd, &slave_fd, nullptr, nullptr, nullptr) == -1) {
     fastlog(ERROR, "Failed to openpty: %s", strerror(errno));
     return "";
   }
-  std::string command = "sudo -E -u " + username + " PATH=$PATH `which rucio` --config /home/jansson/fuse_rucio_cfgs/rucio_ET.cfg whoami";
-  fastlog(INFO, "Executing: %s", command.data());
-
+  
   pid = fork();
   
   if (pid == -1) {
@@ -116,11 +115,9 @@ std::string GET_OIDC(curlOIDCBundle& bundle, uid_t uid, pid_t calling_pid, std::
     // Child process
     close(master_fd);
     
-    // Make the slave PTY the controlling terminal
     setsid();
     ioctl(slave_fd, TIOCSCTTY, 0);
     
-    // Redirect stdin/stdout/stderr to the slave PTY
     dup2(slave_fd, STDIN_FILENO);
     dup2(slave_fd, STDOUT_FILENO);
     dup2(slave_fd, STDERR_FILENO);
@@ -135,46 +132,49 @@ std::string GET_OIDC(curlOIDCBundle& bundle, uid_t uid, pid_t calling_pid, std::
       exit(1);
     }
     
-    // Switch to target user
-    if (setgid(pwd->pw_gid) != 0) {
-      fastlog(ERROR, "Failed to setgid: %s", strerror(errno));
+    // Initialize groups BEFORE setuid
+    if (initgroups(pwd->pw_name, pwd->pw_gid) == -1) {
+      fastlog(ERROR, "initgroups failed: %s", strerror(errno));
+    }
+    
+    // Switch user
+    if (setgid(pwd->pw_gid) == -1) {
+      fastlog(ERROR, "setgid failed: %s", strerror(errno));
       exit(1);
     }
     
-    if (setuid(uid) != 0) {
-      fastlog(ERROR, "Failed to setuid: %s", strerror(errno));
+    if (setuid(uid) == -1) {
+      fastlog(ERROR, "setuid failed: %s", strerror(errno));
       exit(1);
     }
-
-    if (!getuid() == uid)
-    {
-      fastlog(ERROR, "User switch failed.");
+    
+    // Set environment as the user
+    setenv("HOME", pwd->pw_dir, 1);
+    setenv("USER", pwd->pw_name, 1);
+    setenv("LOGNAME", pwd->pw_name, 1);
+    setenv("SHELL", pwd->pw_shell, 1);
+    setenv("PATH", "/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin", 1);
+    
+    chdir(pwd->pw_dir);
+    
+    // TODO: Find rucio - should work now that we're the user
+    //std::string rucio_path = find_rucio_executable();
+    std::string rucio_path = "/home/jansson/venv/rucio_venv/bin/rucio";
+    if (rucio_path.empty()) {
+      rucio_path = "/usr/bin/rucio";  // fallback
     }
     
-    //setenv("HOME", pwd->pw_dir, 1);
-    
-    // Execute rucio
     const char *argv[] = {
-      "/home/jansson/venv/rucio_venv/bin/rucio",
+      rucio_path.c_str(),
       "--config",
       bundle.config_file.c_str(),
       "whoami",
       nullptr
     };
-    /*const char *argv[] = {
-      "sudo",  
-      "-E", 
-      "-u",
-      username.c_str(), 
-      "/home/jansson/venv/rucio_venv/bin/rucio", // TODO:once it works find the path
-      "--config", 
-      bundle.config_file.c_str(),
-      "whoami",
-      nullptr
-    };*/
-    //system(command.data());
-    execvp("/home/jansson/venv/rucio_venv/bin/rucio", (char * const *)argv);
-    // If execvp returns, there was an error  
+    
+    fastlog(INFO, "Executing %s as uid %d", rucio_path.c_str(), getuid());
+    execv(rucio_path.c_str(), (char * const *)argv);
+    
     fastlog(ERROR, "Failed to execute rucio: %s", strerror(errno));
     exit(1);
   } else {
@@ -227,7 +227,7 @@ curlRet GET_x509(const std::string& url, curlx509Bundle& bundle, const struct cu
     fastlog(DEBUG, "CA path %s", bundle.pCACertFile.data());
 
     curl_easy_setopt(static_curl(), CURLOPT_URL, url.data());
-
+    
     // x509 setup
     curl_easy_setopt(static_curl(), CURLOPT_SSLCERT, bundle.pCertFile.data());
     curl_easy_setopt(static_curl(), CURLOPT_SSLCERTTYPE, "PEM");

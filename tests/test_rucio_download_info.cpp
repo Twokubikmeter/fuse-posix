@@ -10,8 +10,14 @@ Authors:
 #include <globals.h>
 #include "rucio-download.h"
 
+#include <pwd.h>
+#include <unistd.h>
+
 int main(){
-  parse_settings_cfg();
+  uid_t uid = getuid();
+  std::string username = getpwuid(uid)->pw_name;
+  pid_t calling_pid = getpid();
+  parse_settings_cfg(uid, calling_pid, username);
   auto info = rucio_download_info("scope:filename", "/ruciofs/server/scope/name");
   printf("scope: %s - filename: %s\n",info.scopename().data(),info.filename().data());
 

@@ -48,8 +48,8 @@ bool server_exists(const std::string &key){
   return rucio_server_map.count(key)>0;
 }
 
-bool scope_exists(const std::string &server_name, const std::string &scope){
-  const auto& scopes = rucio_list_scopes(server_name);
+bool scope_exists(const std::string &server_name, const std::string &scope, uid_t uid, pid_t calling_pid, std::string username){
+  const auto& scopes = rucio_list_scopes(server_name, uid, calling_pid, username);
   return std::find(scopes.begin(), scopes.end(), scope) != scopes.end();
 }
 
@@ -100,10 +100,6 @@ curlOIDCBundle* get_server_OIDC_bundle(const std::string& server_name){
       bundle->oidc_polling = get_cfg_value(line);
     }
 
-    if (line.rfind("auth_token_file_path", 0) == 0) {
-      bundle->auth_token_file_path = get_cfg_value(line);
-    }
-
     if (line.rfind("oidc_username", 0) == 0) {
       bundle->oidc_username = get_cfg_value(line);
     }
@@ -148,14 +144,14 @@ curlx509Bundle* get_server_SSL_bundle(const std::string& server_name){
 }
 
 // Returns token_info if found
-token_info* get_server_token(const std::string& server_name){
-  return (server_exists(server_name)) ? rucio_server_map[server_name].get_token() : nullptr;
+token_info* get_server_token(const std::string& server_name, uid_t uid){
+  return (server_exists(server_name)) ? rucio_server_map[server_name].get_token(uid) : nullptr;
 }
 
 using namespace fastlog;
 
 // Method to parse and validate all the .cfg files found in the RUCIOFS_SETTINGS_FILES_ROOT folder
-void parse_settings_cfg(std::string ruciofs_settings_root){
+void parse_settings_cfg(uid_t uid, pid_t calling_pid, std::string username, std::string ruciofs_settings_root){
 
   if(getenv("RUCIOFS_SETTINGS_FILES_ROOT") != NULL){
     ruciofs_settings_root = getenv("RUCIOFS_SETTINGS_FILES_ROOT");
@@ -185,7 +181,7 @@ void parse_settings_cfg(std::string ruciofs_settings_root){
           settings_file.open(srv.config_file_path.data());
           std::string line;
           std::string ca_file_path;
-          std::string oidc_issuer, oidc_audience, oidc_scope, oidc_polling, auth_oidc_refresh_activate, auth_token_file_path;
+          std::string oidc_issuer, oidc_audience, oidc_scope, oidc_polling, auth_oidc_refresh_activate;
           while (getline(settings_file, line)) {
             if (line.rfind("rucio_host", 0) == 0) {
               srv.rucio_conn_params.server_url = get_cfg_value(line);
@@ -230,10 +226,6 @@ void parse_settings_cfg(std::string ruciofs_settings_root){
             if (line.rfind("", 0) == 0){
               auth_oidc_refresh_activate = get_cfg_value(line);
             }
-
-            if (line.rfind("", 0) == 0){
-              auth_token_file_path = get_cfg_value(line);
-            }
           }
 
 //          settings_file.close();
@@ -266,7 +258,7 @@ void parse_settings_cfg(std::string ruciofs_settings_root){
 
           fastlog(INFO, "Validating server %s.", srv_name.data());
 
-          if (not rucio_validate_server(srv_name)) {
+          if (not rucio_validate_server(srv_name, uid, calling_pid, username)) {
             fastlog(ERROR, "Unable to validate server %s. Dropping.", srv_name.data());
           } else {
             rucio_server_names.emplace_back(srv_name);

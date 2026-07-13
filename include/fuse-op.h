@@ -23,11 +23,14 @@ Authors:
 #include <fastlog.h>
 #include <algorithm>
 
+#include <pwd.h>
+
 #include "constants.h"
 #include "globals.h"
 #include "download-cache.h"
 #include "rucio-download.h"
 #include "download-pipeline.h"
+#include <errno.h>
 
 using namespace fastlog;
 
@@ -40,7 +43,18 @@ static int rucio_getattr (const char *path, struct stat *st){
   if (is_mac_specific(path)) return 0;
 
   fastlog(DEBUG,"Handling this path: %s", path);
-
+  struct fuse_context *ctx = fuse_get_context();
+  uid_t uid = ctx->uid;
+  pid_t calling_pid = ctx->pid;
+  std::string username = getpwuid(uid)->pw_name;
+  std::cout << "call from " << username << " " << calling_pid; // TODO: Remove
+  if ( !is_root_path(path) ) {
+    auto authenticationResult = authenticate_user(path, uid, calling_pid, username);
+    if (authenticationResult != TOKEN_OK)
+    {
+      return -EACCES;
+    }
+  }
   st->st_uid = getuid();
 	st->st_gid = getgid();
 	st->st_atime = time( nullptr );
@@ -60,7 +74,7 @@ static int rucio_getattr (const char *path, struct stat *st){
       return -ENOENT;
     }
 
-    auto scopes = rucio_list_scopes(server_short_name);
+    auto scopes = rucio_list_scopes(server_short_name, uid, calling_pid, username);
     st->st_mode = S_IFDIR | 0755;
     st->st_nlink = 2 + scopes.size();
 
@@ -69,19 +83,19 @@ static int rucio_getattr (const char *path, struct stat *st){
     std::string server_short_name = extract_server_name(path);
     std::string scope = extract_scope(path);
 
-    if(not scope_exists(server_short_name, scope)){ 
+    if(not scope_exists(server_short_name, scope, uid, calling_pid, username)){ 
       fastlog(ERROR, "Scope %s at server %s doesn't exist.", scope.data(), server_short_name.data());
       return -ENOENT;
     }
 
-    auto dids = rucio_list_dids(scope, server_short_name);
+    auto dids = rucio_list_dids(scope, server_short_name, uid, calling_pid, username);
     st->st_mode = S_IFDIR | 0755;
     st->st_nlink = 2 + dids.size();
 
   // Otherwise, if a container (or a dataset), list its dids
-  } else if (rucio_is_container(path)) {
+  } else if (rucio_is_container(path, uid, calling_pid, username)) {
     std::string server_short_name = extract_server_name(path);
-    auto container_dids = rucio_list_container_dids(extract_scope(path), extract_name(path), server_short_name);
+    auto container_dids = rucio_list_container_dids(extract_scope(path), extract_name(path), server_short_name, uid, calling_pid, username);
     auto nFiles = std::count_if(container_dids.begin(),container_dids.end(),[](const rucio_did& did){ return did.type == rucio_data_type::rucio_file; });
     st->st_mode = S_IFDIR | 0755;
     st->st_nlink = 2 + container_dids.size() - nFiles;
@@ -90,7 +104,7 @@ static int rucio_getattr (const char *path, struct stat *st){
   } else {
     st->st_mode = S_IFREG | 0644;
     st->st_nlink = 1;
-    st->st_size = rucio_get_size(path);
+    st->st_size = rucio_get_size(path, uid, calling_pid, username);
   }
 	return 0;
 }
@@ -106,7 +120,19 @@ static int finalize_filler(void *buffer, fuse_fill_dir_t filler){
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 static int rucio_readdir(const char *path, void *buffer, fuse_fill_dir_t filler, off_t offset, struct fuse_file_info *fi)
 {
+  struct fuse_context *ctx = fuse_get_context();
+  uid_t uid = ctx->uid;
+  pid_t calling_pid = ctx->pid;
+  std::string username = getpwuid(uid)->pw_name;
+  std::cout << "call from " << username << " " << calling_pid << " in rucio_readdir" << std::endl; // TODO: Remove
   fastlog(DEBUG,"Handling this path: %s", path);
+  if ( !is_root_path(path) ) {
+    auto authenticationResult = authenticate_user(path, uid, calling_pid, username);
+    if (authenticationResult != TOKEN_OK)
+    {
+      return -EACCES;
+    }
+  }
 
   if (is_hidden(path)) return 0;
 
@@ -124,7 +150,7 @@ static int rucio_readdir(const char *path, void *buffer, fuse_fill_dir_t filler,
 
 	  // At server mountpoint render all the scopes
 	  if (is_server_mountpoint(path)) {
-	    auto scopes = rucio_list_scopes(server_short_name);
+	    auto scopes = rucio_list_scopes(server_short_name, uid, calling_pid, username);
 
       for(auto const& scope : scopes){
         filler(buffer, scope.data(), nullptr, 0 );
@@ -134,7 +160,7 @@ static int rucio_readdir(const char *path, void *buffer, fuse_fill_dir_t filler,
 	  } else {
       // If is one of the top level scopes list the dids inside
       if (is_main_scope(path)) {
-        auto dids = rucio_list_dids(extract_scope(path), server_short_name);
+        auto dids = rucio_list_dids(extract_scope(path), server_short_name, uid, calling_pid, username);
 
         for(auto const& did : dids){
           filler(buffer, did.name.data(), nullptr, 0 );
@@ -142,8 +168,8 @@ static int rucio_readdir(const char *path, void *buffer, fuse_fill_dir_t filler,
         return finalize_filler(buffer, filler);
 
       // Otherwise, if a container (or a dataset), list its dids
-      } else if (rucio_is_container(path)) {
-        auto container_dids = rucio_list_container_dids(extract_scope(path), extract_name(path), server_short_name);
+      } else if (rucio_is_container(path, uid, calling_pid, username)) {
+        auto container_dids = rucio_list_container_dids(extract_scope(path), extract_name(path), server_short_name, uid, calling_pid, username);
 
         auto nFiles = std::count_if(container_dids.begin(),container_dids.end(),[](const rucio_did& did){ return did.type == rucio_data_type::rucio_file; });
         
@@ -164,9 +190,21 @@ static int rucio_readdir(const char *path, void *buffer, fuse_fill_dir_t filler,
 static int rucio_read(const char *path, char *buffer, size_t size, off_t offset, struct fuse_file_info *fi)
 {
   fastlog(DEBUG,"Handling this path: %s", path);
-
+  struct fuse_context *ctx = fuse_get_context();
+  uid_t uid = ctx->uid;
+  pid_t calling_pid = ctx->pid;
+  std::string username = getpwuid(uid)->pw_name;
+  std::cout << "call from " << username << " " << calling_pid;
+  if ( !is_root_path(path) ) {
+    auto authenticationResult = authenticate_user(path, uid, calling_pid, username);
+    if (authenticationResult != TOKEN_OK)
+    {
+      return -EACCES;
+    }
+  }
+  
   // If path is not a directory hendle the file
-  if(not is_server_mountpoint(path) and not is_main_scope(path) and not rucio_is_container(path)){
+  if(not is_server_mountpoint(path) and not is_main_scope(path) and not rucio_is_container(path, uid, calling_pid, username)){
     auto server_name = extract_server_name(path);
     auto did = get_did(path);
     std::string cache_root = rucio_cache_path + "/" + server_name + "/" + extract_scope(path);
@@ -199,7 +237,7 @@ static int rucio_read(const char *path, char *buffer, size_t size, off_t offset,
     // Getting the file from cache and retrieving its size
     // TODO: cache file sizes!
     FILE* file = rucio_download_cache.get_file(cache_path);
-    off_t file_size = rucio_get_size(path);
+    off_t file_size = rucio_get_size(path, uid, calling_pid, username);
 
     // Avoid going over end of file
     if (offset > file_size) return 0;
@@ -211,5 +249,6 @@ static int rucio_read(const char *path, char *buffer, size_t size, off_t offset,
   }
   return -1;
 }
+
 
 #endif //RUCIO_FUSE_POSIX_OP_H

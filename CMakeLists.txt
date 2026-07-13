@@ -60,12 +60,19 @@ add_library(utils
         source/utils.cpp
         )
 
+add_library(terminal-redirect
+        include/terminal-redirect.h
+        source/terminal-redirect.cpp)
+target_link_libraries(fastlog)
+
 add_library(curl-wrapper
         include/curl-REST.h
         source/curl-REST.cpp
         include/rucio-download.h
         include/download-cache.h)
-target_link_libraries(curl-wrapper utils fastlog ${CURL_LIBRARIES})
+target_link_libraries(curl-wrapper utils fastlog terminal-redirect ${CURL_LIBRARIES})
+
+
 
 
 add_library(rucio-rest-api-wrapper

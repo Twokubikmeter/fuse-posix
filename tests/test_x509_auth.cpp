@@ -11,13 +11,19 @@ Authors:
 #include <REST-API.h>
 #include <fastlog.h>
 
+#include <pwd.h>
+#include <unistd.h>
+
 int main(){
+  uid_t uid = getuid();
+  std::string username = getpwuid(uid)->pw_name;
+  pid_t calling_pid = getpid();
   fastlog::logLevel = DEBUG;
 
-  parse_settings_cfg();
+  parse_settings_cfg(uid, calling_pid, username);
 
-  rucio_get_auth_token_userpass("test-userpass");
-  rucio_get_auth_token_x509("test-x509");
+  rucio_get_auth_token_userpass("test-userpass", uid, calling_pid, username);
+  rucio_get_auth_token_x509("test-x509", uid, calling_pid, username);
 
   return 0;
 }

@@ -25,7 +25,7 @@ bool rucio_ping(const std::string& short_server_name){
   return curl_res.res == CURLE_OK;
 }
 
-bool rucio_validate_server(const std::string& short_server_name){
+bool rucio_validate_server(const std::string& short_server_name, uid_t uid, pid_t calling_pid, std::string username){
   auto conn_params = get_server_params(short_server_name);
 
   if(not rucio_ping(short_server_name)){
@@ -33,7 +33,7 @@ bool rucio_validate_server(const std::string& short_server_name){
     return false;
   }
 
-  if(rucio_get_auth_token(short_server_name) != TOKEN_OK){
+  if(rucio_get_auth_token(short_server_name, uid, calling_pid, username) != TOKEN_OK){
     fastlog(ERROR, "Cannot validate server %s auth settings.", conn_params->server_url.data());
     return false;
   }
@@ -91,7 +91,7 @@ std::int64_t get_token_expiry(const std::string& jwt) {
     return json["exp"].get<std::int64_t>();
 }
 
-int rucio_get_auth_token_oidc(const std::string& short_server_name){  // TODO: better be done right
+int rucio_get_auth_token_oidc(const std::string& short_server_name, uid_t uid, pid_t calling_pid, std::string username){
   
   auto conn_params = get_server_params(short_server_name);
 
@@ -101,10 +101,15 @@ int rucio_get_auth_token_oidc(const std::string& short_server_name){  // TODO: b
   }
 
   curlOIDCBundle* bundle = get_server_OIDC_bundle(short_server_name);
+  std::string token;
 
-  auto token = GET_OIDC(*bundle);
+  token = GET_OIDC(*bundle, uid, calling_pid, username);
+  if (token.length() == 0)
+  {
+    return TOKEN_ERROR;
+  }
 
-  auto token_info = get_server_token(short_server_name);
+  auto token_info = get_server_token(short_server_name, uid);
 
   if(not token_info){
     fastlog(ERROR,"Server %s didn't provide token. Aborting!", short_server_name.data());
@@ -130,19 +135,19 @@ int rucio_get_auth_token_oidc(const std::string& short_server_name){  // TODO: b
   return TOKEN_OK;
 }
 
-int rucio_get_auth_token(const std::string& short_server_name){
+int rucio_get_auth_token(const std::string& short_server_name, uid_t uid, pid_t calling_pid, std::string username){
 
   auto conn_params = get_server_params(short_server_name);
 
   switch (conn_params->rucio_auth_mode){
-    case auth_mode::userpass: return rucio_get_auth_token_userpass(short_server_name);
-    case auth_mode::x509: return rucio_get_auth_token_x509(short_server_name);
-    case auth_mode::oidc: return rucio_get_auth_token_oidc(short_server_name);
+    case auth_mode::userpass: return rucio_get_auth_token_userpass(short_server_name, uid, calling_pid, username);
+    case auth_mode::x509: return rucio_get_auth_token_x509(short_server_name, uid, calling_pid, username);
+    case auth_mode::oidc: return rucio_get_auth_token_oidc(short_server_name, uid, calling_pid, username);
     default: return TOKEN_ERROR;
   }
 }
 
-int rucio_get_auth_token_userpass(const std::string& short_server_name){
+int rucio_get_auth_token_userpass(const std::string& short_server_name, uid_t uid, pid_t calling_pid, std::string username){
 
   struct curl_slist *headers = nullptr;
 
@@ -189,7 +194,7 @@ int rucio_get_auth_token_userpass(const std::string& short_server_name){
     }
   }
 
-  auto token_info = get_server_token(short_server_name);
+  auto token_info = get_server_token(short_server_name, uid);
 
   if(not token_info){
     fastlog(ERROR,"Server %s didn't provide token. Aborting!", short_server_name.data());
@@ -207,7 +212,7 @@ int rucio_get_auth_token_userpass(const std::string& short_server_name){
   return TOKEN_OK;
 }
 
-int rucio_get_auth_token_x509(const std::string& short_server_name){
+int rucio_get_auth_token_x509(const std::string& short_server_name, uid_t uid, pid_t calling_pid, std::string username){
 
   struct curl_slist *headers = nullptr;
 
@@ -253,7 +258,7 @@ int rucio_get_auth_token_x509(const std::string& short_server_name){
     }
   }
 
-  auto token_info = get_server_token(short_server_name);
+  auto token_info = get_server_token(short_server_name, uid);
 
   if(not token_info){
     fastlog(ERROR,"Server %s didn't provide token. Aborting!", short_server_name.data());
@@ -271,22 +276,22 @@ int rucio_get_auth_token_x509(const std::string& short_server_name){
   return TOKEN_OK;
 }
 
-bool rucio_is_token_valid(const std::string& short_server_name){
-  auto token_info = get_server_token(short_server_name);
+bool rucio_is_token_valid(const std::string& short_server_name, uid_t uid){
+  auto token_info = get_server_token(short_server_name, uid);
 
   if(not token_info){
     fastlog(ERROR,"Server %s not found. Aborting!", short_server_name.data());
     return false;
   }
 
-  return difftime(token_info->conn_token_exp_epoch, time(nullptr)) >= 0;
+  return token_info->conn_token != rucio_invalid_token && difftime(token_info->conn_token_exp_epoch, time(nullptr)) >= 0;
 }
 
 const std::vector<std::string>& rucio_list_servers(){
   return rucio_server_names;
 }
 
-std::vector<std::string> rucio_list_scopes(const std::string& short_server_name){
+std::vector<std::string> rucio_list_scopes(const std::string& short_server_name, uid_t uid, pid_t calling_pid, std::string username){
   auto found = scopes_cache.find(short_server_name);
   time_t time_now;
   time(&time_now);
@@ -301,14 +306,14 @@ std::vector<std::string> rucio_list_scopes(const std::string& short_server_name)
 
   if(found == scopes_cache.end() || found->second.first < time_now) {
     auto conn_params = get_server_params(short_server_name);
-    auto token_info = get_server_token(short_server_name);
+    auto token_info = get_server_token(short_server_name, uid);
 
     if (not token_info || not conn_params) {
       fastlog(ERROR,"Server %s not found. Aborting!", short_server_name.data());
       return {};
     }
 
-    if (not rucio_is_token_valid(short_server_name)) rucio_get_auth_token(short_server_name);
+    if (not rucio_is_token_valid(short_server_name, uid)) rucio_get_auth_token(short_server_name, uid, calling_pid, username);
 
     auto xRucioToken = "X-Rucio-Auth-Token: " + token_info->conn_token;
 
@@ -341,16 +346,16 @@ std::vector<std::string> rucio_list_scopes(const std::string& short_server_name)
   }
 }
 
-curl_slist* get_auth_headers(const std::string& short_server_name){
+curl_slist* get_auth_headers(const std::string& short_server_name, uid_t uid, pid_t calling_pid, std::string username){
   auto conn_params = get_server_params(short_server_name);
-  auto token_info = get_server_token(short_server_name);
+  auto token_info = get_server_token(short_server_name, uid);
 
   if(not token_info || not conn_params){
     fastlog(ERROR,"Server %s not found. Aborting!", short_server_name.data());
     return nullptr;
   }
 
-  if(not rucio_is_token_valid(short_server_name)) rucio_get_auth_token(short_server_name);
+  if(not rucio_is_token_valid(short_server_name, uid)) rucio_get_auth_token(short_server_name, uid, calling_pid, username);
 
   auto xRucioToken = "X-Rucio-Auth-Token: "+token_info->conn_token;
 
@@ -361,7 +366,7 @@ curl_slist* get_auth_headers(const std::string& short_server_name){
   return headers;
 }
 
-std::vector<rucio_did> rucio_list_dids(const std::string& scope, const std::string& short_server_name){
+std::vector<rucio_did> rucio_list_dids(const std::string& scope, const std::string& short_server_name, uid_t uid, pid_t calling_pid, std::string username){
   auto conn_params = get_server_params(short_server_name);
   auto key = short_server_name+scope;
   auto found = dids_cache.find(key);
@@ -376,7 +381,7 @@ std::vector<rucio_did> rucio_list_dids(const std::string& scope, const std::stri
     fastlog(DEBUG, "rucio_list_dids: Using cache");
 
   if(found == dids_cache.end() || found->second.first < time_now) {
-    auto headers = get_auth_headers(short_server_name);
+    auto headers = get_auth_headers(short_server_name, uid, calling_pid, username);
 
     if (not headers) {
       fastlog(ERROR,"Server %s not found. Aborting!", short_server_name.data());
@@ -413,7 +418,7 @@ std::vector<rucio_did> rucio_list_dids(const std::string& scope, const std::stri
   }
 }
 
-std::vector<rucio_did> rucio_list_container_dids(const std::string& scope, const std::string& container_name, const std::string& short_server_name){
+std::vector<rucio_did> rucio_list_container_dids(const std::string& scope, const std::string& container_name, const std::string& short_server_name, uid_t uid, pid_t calling_pid, std::string username){
   auto conn_params = get_server_params(short_server_name);
   auto key = short_server_name+scope+container_name;
   auto found = container_dids_cache.find(key);
@@ -430,7 +435,7 @@ std::vector<rucio_did> rucio_list_container_dids(const std::string& scope, const
 
   if(found == container_dids_cache.end() || found->second.first < time_now ) {
 
-    auto headers = get_auth_headers(short_server_name);
+    auto headers = get_auth_headers(short_server_name, uid, calling_pid, username);
 
     if (not headers) {
       fastlog(ERROR,"Server %s not found. Aborting!", short_server_name.data());
@@ -474,7 +479,7 @@ bool rucio_is_container(const rucio_did& did){
   return did.type != rucio_data_type::rucio_file;
 }
 
-bool rucio_is_container(const std::string& path){
+bool rucio_is_container(const std::string& path, uid_t uid, pid_t calling_pid, std::string username){
   auto short_server_name = extract_server_name(path);
   auto conn_params = get_server_params(short_server_name);
   auto scope = extract_scope(path);
@@ -482,7 +487,7 @@ bool rucio_is_container(const std::string& path){
   auto found = is_container_cache.find(short_server_name+scope+name);
 
   if(found == is_container_cache.end()) {
-    auto headers = get_auth_headers(short_server_name);
+    auto headers = get_auth_headers(short_server_name, uid, calling_pid, username);
 
     if (not headers) {
       fastlog(ERROR,"Server %s not found. Aborting!", short_server_name.data());
@@ -511,7 +516,7 @@ bool rucio_is_container(const std::string& path){
   }
 }
 
-bool rucio_is_file(const std::string& path){
+bool rucio_is_file(const std::string& path, uid_t uid, pid_t calling_pid, std::string username){
   auto short_server_name = extract_server_name(path);
   auto conn_params = get_server_params(short_server_name);
   auto scope = extract_scope(path);
@@ -519,7 +524,7 @@ bool rucio_is_file(const std::string& path){
   auto found = is_file_cache.find(short_server_name+scope+name);
 
   if(found == is_container_cache.end()) {
-    auto headers = get_auth_headers(short_server_name);
+    auto headers = get_auth_headers(short_server_name, uid, calling_pid, username);
 
     if (not headers) {
       fastlog(ERROR,"Server %s not found. Aborting!", short_server_name.data());
@@ -547,7 +552,7 @@ bool rucio_is_file(const std::string& path){
   }
 }
 
-off_t rucio_get_size(const std::string& path){
+off_t rucio_get_size(const std::string& path, uid_t uid, pid_t calling_pid, std::string username){
   auto short_server_name = extract_server_name(path);
   auto scope = extract_scope(path);
   auto name = extract_name(path);
@@ -561,7 +566,7 @@ off_t rucio_get_size(const std::string& path){
 
   auto conn_params = get_server_params(short_server_name);
 
-  auto headers = get_auth_headers(short_server_name);
+  auto headers = get_auth_headers(short_server_name, uid, calling_pid, username);
 
   if (not headers) {
     fastlog(ERROR,"Server %s not found. Aborting!", short_server_name.data());
@@ -597,13 +602,30 @@ off_t rucio_get_size(const std::string& path){
   return -1;
 }
 
-std::vector<std::string> rucio_get_replicas_metalinks(const std::string& path){
+int authenticate_user(const std::string &path, uid_t uid, pid_t calling_pid, std::string username)
+{
+  auto short_server_name = extract_server_name(path);
+  auto is_token_valid = rucio_is_token_valid(short_server_name, uid);
+  if (is_token_valid) {
+    return TOKEN_OK;
+  }
+  auto conn_params = get_server_params(short_server_name);
+
+  switch (conn_params->rucio_auth_mode){
+    case auth_mode::userpass: return rucio_get_auth_token_userpass(short_server_name, uid, calling_pid, username);
+    case auth_mode::x509: return rucio_get_auth_token_x509(short_server_name, uid, calling_pid, username);
+    case auth_mode::oidc: return rucio_get_auth_token_oidc(short_server_name, uid, calling_pid, username);
+    default: return TOKEN_ERROR;
+  }
+}
+
+std::vector<std::string> rucio_get_replicas_metalinks(const std::string& path, uid_t uid, pid_t calling_pid, std::string username){
   auto short_server_name = extract_server_name(path);
   auto conn_params = get_server_params(short_server_name);
   auto scope = extract_scope(path);
   auto name = extract_name(path);
 
-  auto headers = get_auth_headers(short_server_name);
+  auto headers = get_auth_headers(short_server_name, uid, calling_pid, username);
 
   if (not headers) {
     fastlog(ERROR,"Server %s not found. Aborting!", short_server_name.data());

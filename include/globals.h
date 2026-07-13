@@ -20,6 +20,7 @@ Authors:
 #include <unordered_map>
 #include <vector>
 #include <utility>
+#include <map>
 #include "curl-REST.h"
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -80,10 +81,10 @@ struct token_info{
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 struct rucio_server{
   connection_parameters rucio_conn_params;
-  token_info rucio_token_info;
+  std::map<uid_t, token_info> rucio_token_infos;
   std::string config_file_path;
 
-  rucio_server():rucio_conn_params("","","","",""), rucio_token_info(){};
+  rucio_server():rucio_conn_params("","","","",""), rucio_token_infos(){};
 
   rucio_server(std::string server_url,
                std::string account_name,
@@ -97,23 +98,23 @@ struct rucio_server{
                                  std::move(password),
                                  std::move(ca_path),
                                  auth_mode),
-               rucio_token_info(){}
+               rucio_token_infos(){}
 
   connection_parameters* get_params(){ return &rucio_conn_params; };
-  token_info* get_token(){ return &rucio_token_info; };
+  token_info* get_token(uid_t uid){ return &(rucio_token_infos[uid]); };
 };
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 // Server descriptors cache
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-extern std::unordered_map<std::string, rucio_server> rucio_server_map;
+extern std::unordered_map<std::string, rucio_server>  rucio_server_map;
 extern std::vector<std::string> rucio_server_names;
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 // Server and scope existance utilities
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 bool server_exists(const std::string &key);
-bool scope_exists(const std::string &server_name, const std::string &scope);
+bool scope_exists(const std::string &server_name, const std::string &scope, uid_t uid, pid_t calling_pid, std::string username);
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 // Methods to get server configs and params. Wrapped around the caches to protect against non existing servers.
@@ -126,12 +127,12 @@ std::string*  get_server_config(const std::string& server_name);
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 curlx509Bundle* get_server_SSL_bundle(const std::string& server_name);
 curlOIDCBundle* get_server_OIDC_bundle(const std::string& server_name);
-token_info* get_server_token(const std::string& server_name);
+token_info* get_server_token(const std::string& server_name, uid_t uid);
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 // Startup methods. Configuration file parser and permission checker.
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-void parse_settings_cfg(std::string ruciofs_settings_root = "./rucio-settings");
+void parse_settings_cfg(uid_t uid, pid_t calling_pid, std::string username, std::string ruciofs_settings_root = "./rucio-settings");
 bool check_permissions(const std::string& mountpoint_path);
 
 #endif //RUCIO_FUSE_CONNNECTION_PARAMETERS_H

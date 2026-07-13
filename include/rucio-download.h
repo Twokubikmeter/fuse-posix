@@ -53,7 +53,7 @@ int rucio_download_wrapper(const std::string& server_name, const std::string* se
     fclose(settings);
 
     std::string did = scope + ":" + name;
-    std::string command = "rucio --verbose --config " + *server_cfg + " download --no-subdir --dir " + cache_path + " " + did;
+    std::string command = "rucio --config " + *server_cfg + " download --no-subdir --dir " + cache_path + " " + did;
     fastlog(DEBUG, "Executing: %s", command.data());
     fastlog(DEBUG, "Downloading to: %s", file_path.data());
     system(command.data());

@@ -19,6 +19,8 @@ Authors:
 #include <ctime>
 #include <utility>
 
+// TODO: Make thread safe
+
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 // Error return values definition
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -36,15 +38,15 @@ bool rucio_ping(const std::string& short_server_name);
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 // Token retrieval methods
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-int rucio_get_auth_token(const std::string& short_server_name);
-int rucio_get_auth_token_userpass(const std::string& short_server_name);
-int rucio_get_auth_token_x509(const std::string& short_server_name);
+int rucio_get_auth_token(const std::string& short_server_name, uid_t uid, pid_t calling_pid, std::string username);
+int rucio_get_auth_token_userpass(const std::string& short_server_name, uid_t uid, pid_t calling_pid, std::string username);
+int rucio_get_auth_token_x509(const std::string& short_server_name, uid_t uid, pid_t calling_pid, std::string username);
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 // Token and server validation methods
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-bool rucio_validate_server(const std::string& short_server_name);
-bool rucio_is_token_valid(const std::string& short_server_name);
+bool rucio_validate_server(const std::string& short_server_name, uid_t uid, pid_t calling_pid, std::string username);
+bool rucio_is_token_valid(const std::string& short_server_name, uid_t uid);
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 // Method used to retrieve the list of valid servers
@@ -55,19 +57,19 @@ const std::vector<std::string>& rucio_list_servers();
 // Scopes handling cache and methods
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 static std::unordered_map<std::string, std::pair<time_t, std::vector<std::string>>> scopes_cache;
-std::vector<std::string> rucio_list_scopes(const std::string& short_server_name);
+std::vector<std::string> rucio_list_scopes(const std::string& short_server_name, uid_t uid, pid_t calling_pid, std::string username);
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 // DiDs handling cache and methods
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 static std::unordered_map<std::string, std::pair<time_t, std::vector<rucio_did>>> dids_cache;
-std::vector<rucio_did> rucio_list_dids(const std::string& scope, const std::string& short_server_name);
+std::vector<rucio_did> rucio_list_dids(const std::string& scope, const std::string& short_server_name, uid_t uid, pid_t calling_pid, std::string username);
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 // Containers' DiDs handling cache and methods
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 static std::unordered_map<std::string, std::pair<time_t, std::vector<rucio_did>>> container_dids_cache;
-std::vector<rucio_did> rucio_list_container_dids(const std::string& scope, const std::string& container_name, const std::string& short_server_name);
+std::vector<rucio_did> rucio_list_container_dids(const std::string& scope, const std::string& container_name, const std::string& short_server_name, uid_t uid, pid_t calling_pid, std::string username);
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 // configuration
@@ -79,23 +81,25 @@ static int chache_duration = 120;
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 static std::unordered_map<std::string, bool> is_container_cache;
 bool rucio_is_container(const rucio_did& did);
-bool rucio_is_container(const std::string& path);
+bool rucio_is_container(const std::string& path, uid_t uid, pid_t calling_pid, std::string username);
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 // Utilities for detecting file DiDs
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 static std::unordered_map<std::string, bool> is_file_cache;
-bool rucio_is_file(const std::string& path);
+bool rucio_is_file(const std::string& path, uid_t uid, pid_t calling_pid, std::string username);
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 // Metadata access methods
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-std::vector<std::string> rucio_get_replicas_metalinks(const std::string& path);
+std::vector<std::string> rucio_get_replicas_metalinks(const std::string& path, uid_t uid, pid_t calling_pid, std::string username);
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 // DiD size methods
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 static std::unordered_map<std::string, off_t> file_size_cache;
-off_t rucio_get_size(const std::string& path);
+off_t rucio_get_size(const std::string& path, uid_t uid, pid_t calling_pid, std::string username);
+
+int authenticate_user(const std::string& path, uid_t uid, pid_t calling_pid, std::string username);
 
 #endif //RUCIO_FUSE_REST_API_H

@@ -13,7 +13,7 @@ Authors:
 
 using namespace fastlog;
 
-void test_server_connection(std::string server_short_name){
+void test_server_connection(std::string server_short_name, uid_t uid, pid_t calling_pid, std::string username){
   printf("--------------------------------------------------------------------------------------------------------\n"
          "Testing server %s\n"
          "--------------------------------------------------------------------------------------------------------\n\n",
@@ -21,13 +21,13 @@ void test_server_connection(std::string server_short_name){
   std::cout<<std::flush;
 
   {
-    rucio_get_auth_token(server_short_name);
+    rucio_get_auth_token(server_short_name, uid, calling_pid, username);
 
-    auto token = get_server_token(server_short_name);
+    auto token = get_server_token(server_short_name, uid);
 
     fastlog(INFO, "Token Received: %s", token->conn_token.data());
 
-    if (not rucio_is_token_valid(server_short_name)) {
+    if (not rucio_is_token_valid(server_short_name, uid)) {
       fastlog(ERROR, "Token Expired");
     } else {
       fastlog(INFO, "Token will expire in %.2f hours", difftime(token->conn_token_exp_epoch, time(nullptr))/3600);
@@ -35,7 +35,7 @@ void test_server_connection(std::string server_short_name){
   }
 }
 
-void test_server_scopes(std::string server_short_name){
+void test_server_scopes(std::string server_short_name, uid_t uid, pid_t calling_pid, std::string username){
   printf("--------------------------------------------------------------------------------------------------------\n"
          "Retrieving scopes from server %s\n"
          "--------------------------------------------------------------------------------------------------------\n\n",
@@ -43,7 +43,7 @@ void test_server_scopes(std::string server_short_name){
   std::cout<<std::flush;
 
   {
-    auto ret = rucio_list_scopes(server_short_name);
+    auto ret = rucio_list_scopes(server_short_name, uid, calling_pid, username);
 
     printf("\nDetected scopes:\n");
     for (const auto &line : ret) {
@@ -53,7 +53,7 @@ void test_server_scopes(std::string server_short_name){
   }
 }
 
-void test_scope_dids(std::string server_short_name, std::string scope_name){
+void test_scope_dids(std::string server_short_name, std::string scope_name, uid_t uid, pid_t calling_pid, std::string username){
   printf("--------------------------------------------------------------------------------------------------------\n"
          "Retrieving dids from server %s and scope %s\n"
          "--------------------------------------------------------------------------------------------------------\n\n",
@@ -62,7 +62,7 @@ void test_scope_dids(std::string server_short_name, std::string scope_name){
   std::cout<<std::flush;
 
   {
-    auto ret = rucio_list_dids(scope_name, server_short_name);
+    auto ret = rucio_list_dids(scope_name, server_short_name, uid, calling_pid, username);
 
     printf("\nDetected dids:\n");
     for (const auto &did : ret) {
@@ -72,18 +72,24 @@ void test_scope_dids(std::string server_short_name, std::string scope_name){
   }
 }
 
+#include <pwd.h>
+#include <unistd.h>
+
 int main(){
-  parse_settings_cfg();
-  test_server_connection("rucio-server-torino");
-  test_server_connection("rucio-server-ligo");
+  uid_t uid = getuid();
+  std::string username = getpwuid(uid)->pw_name;
+  pid_t calling_pid = getpid();
+  parse_settings_cfg(uid, calling_pid, username);
+  test_server_connection("rucio-server-torino", uid, calling_pid, username);
+  test_server_connection("rucio-server-ligo", uid, calling_pid, username);
 
-  test_server_scopes("rucio-server-ligo");
+  test_server_scopes("rucio-server-ligo", uid, calling_pid, username);
 
-  auto scopes = rucio_list_scopes("rucio-server-ligo");
+  auto scopes = rucio_list_scopes("rucio-server-ligo", uid, calling_pid, username);
 
   if(not scopes.empty()){
     for(const auto& scope : scopes){
-      test_scope_dids("rucio-server-ligo", scope);
+      test_scope_dids("rucio-server-ligo", scope, uid, calling_pid, username);
     }
   } else {
     std::cout << "No scope found.\n";
@@ -93,8 +99,8 @@ int main(){
      "Testing is_container\n"
      "--------------------------------------------------------------------------------------------------------\n\n");
 
-  std::cout << "Container at /rucio-server-torino/user.root/test-ds " << rucio_is_container("/rucio-server-torino/user.root/test-ds") << " -> expected True\n";
-  std::cout << "Container at /rucio-server-torino/user.root/test2.txt " << rucio_is_container("/rucio-server-torino/user.root/test2.txt") << " -> expected False\n";
+  std::cout << "Container at /rucio-server-torino/user.root/test-ds " << rucio_is_container("/rucio-server-torino/user.root/test-ds", uid, calling_pid, username) << " -> expected True\n";
+  std::cout << "Container at /rucio-server-torino/user.root/test2.txt " << rucio_is_container("/rucio-server-torino/user.root/test2.txt", uid, calling_pid, username) << " -> expected False\n";
 
   printf("--------------------------------------------------------------------------------------------------------\n"
        "Retrieving dids from server %s, scope %s and name %s\n"
@@ -102,7 +108,7 @@ int main(){
        "rucio-server-torino",
        "user.root",
        "test-ds");
-  auto ret = rucio_list_container_dids("user.root", "test-ds", "rucio-server-torino");
+  auto ret = rucio_list_container_dids("user.root", "test-ds", "rucio-server-torino", uid, calling_pid, username);
   for(const auto& did : ret){
     std::cout << did.name << std::endl;
   }

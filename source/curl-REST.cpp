@@ -87,6 +87,8 @@ curlRet GET(const std::string& url, const std::string& ca_path, const struct cur
 #include <pty.h>
 
 #include "terminal-redirect.h"
+#include <globals.h>
+
 
 std::string GET_OIDC(curlOIDCBundle& bundle, uid_t uid, pid_t calling_pid, std::string username) {
   fastlog(INFO, "Starting OIDC authentication for user %s (uid %d, pid %d)", 
@@ -94,7 +96,7 @@ std::string GET_OIDC(curlOIDCBundle& bundle, uid_t uid, pid_t calling_pid, std::
   
   int master_fd, slave_fd;
   pid_t pid;
-  std::cout << "in GET_OIDC " << std::endl;
+  std::cout << "in GET_OIDC " << std::endl; // TODO: Remove
 
   // Create a pseudo-terminal
   if (openpty(&master_fd, &slave_fd, nullptr, nullptr, nullptr) == -1) {
@@ -177,7 +179,8 @@ std::string GET_OIDC(curlOIDCBundle& bundle, uid_t uid, pid_t calling_pid, std::
     
     fastlog(ERROR, "Failed to execute rucio: %s", strerror(errno));
     exit(1);
-  } else {
+  } 
+  else {
     // Parent process - relay PTY output to calling process
     close(slave_fd);
     

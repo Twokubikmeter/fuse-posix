@@ -47,7 +47,7 @@ static int rucio_getattr (const char *path, struct stat *st){
   uid_t uid = ctx->uid;
   pid_t calling_pid = ctx->pid;
   std::string username = getpwuid(uid)->pw_name;
-  std::cout << "call from " << username << " " << calling_pid; // TODO: Remove
+  std::cout << "call from " << username << " " << calling_pid << " in rucio_getattr" << std::endl; // TODO: Remove
   if ( !is_root_path(path) ) {
     auto authenticationResult = authenticate_user(path, uid, calling_pid, username);
     if (authenticationResult != TOKEN_OK)
@@ -194,7 +194,7 @@ static int rucio_read(const char *path, char *buffer, size_t size, off_t offset,
   uid_t uid = ctx->uid;
   pid_t calling_pid = ctx->pid;
   std::string username = getpwuid(uid)->pw_name;
-  std::cout << "call from " << username << " " << calling_pid;
+  std::cout << "call from " << username << " " << calling_pid <<" in rucio_read" << std::endl; // TODO: Remove
   if ( !is_root_path(path) ) {
     auto authenticationResult = authenticate_user(path, uid, calling_pid, username);
     if (authenticationResult != TOKEN_OK)

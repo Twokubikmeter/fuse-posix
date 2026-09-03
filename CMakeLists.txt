@@ -70,7 +70,7 @@ add_library(curl-wrapper
         source/curl-REST.cpp
         include/rucio-download.h
         include/download-cache.h)
-target_link_libraries(curl-wrapper utils fastlog terminal-redirect ${CURL_LIBRARIES})
+target_link_libraries(curl-wrapper utils fastlog terminal-redirect globals ${CURL_LIBRARIES})
 
 
 

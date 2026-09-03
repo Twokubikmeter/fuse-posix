@@ -92,6 +92,7 @@ struct curlOIDCBundle{
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 curlRet GET(const std::string& url, const std::string& ca_path, const struct curl_slist * headers = nullptr, bool include_headers = false, long timeout = 2L, bool insecure = false);
 curlRet GET_x509(const std::string& url, curlx509Bundle& bundle, const struct curl_slist* headers, bool include_headers = false, long timeout = 2L);
+// std::string GET_OIDC_ASYNC(curlOIDCBundle& bundle, uid_t uid, pid_t calling_pid, std::string username, std::string short_server_name);
 std::string GET_OIDC(curlOIDCBundle& bundle, uid_t uid, pid_t calling_pid, std::string username);
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 // This is a safe REST GET wrapper which retries multiple times before failing

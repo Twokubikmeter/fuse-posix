@@ -14,7 +14,8 @@ Authors:
 #include <utils.h>
 #include <iostream>
 #include <time.h>
-#include <nlohmann/json.hpp>
+#include <unistd.h>
+#include <pthread.h>
 
 using namespace fastlog;
 
@@ -25,73 +26,54 @@ bool rucio_ping(const std::string& short_server_name){
   return curl_res.res == CURLE_OK;
 }
 
-bool rucio_validate_server(const std::string& short_server_name, uid_t uid, pid_t calling_pid, std::string username){
-  auto conn_params = get_server_params(short_server_name);
+void* GET_OIDC_wrapper(void* args)
+{
+  void** argarray = reinterpret_cast<void**>(args);
+  curlOIDCBundle* bundle = reinterpret_cast<curlOIDCBundle*>(argarray[0]);
 
-  if(not rucio_ping(short_server_name)){
-    fastlog(ERROR, "Server %s unreachable via network.", conn_params->server_url.data());
-    return false;
+  uid_t* uid = reinterpret_cast<uid_t*>(argarray[1]);
+  pid_t* calling_pid = reinterpret_cast<pid_t*>(argarray[2]);
+  std::string* username = reinterpret_cast<std::string*>(argarray[3]);
+  token_info* token_info_p = reinterpret_cast<token_info*>(argarray[4]);
+  std::string* short_server_name = reinterpret_cast<std::string*>(argarray[5]);
+  std::string token = GET_OIDC(*bundle, *uid, *calling_pid, *username);
+  if (token.length() == 0)
+  {
+    pthread_exit(NULL);
+  }
+  long exp = get_token_expiry(token);
+  char localTimeString[80];
+  char utcTimeString[80];
+  strftime(localTimeString, sizeof(localTimeString), "%a %Y-%m-%d %H:%M:%S %Z", localtime(&exp));
+  strftime(utcTimeString, sizeof(utcTimeString), "%a %Y-%m-%d %H:%M:%S %Z", gmtime(&exp));
+
+  fastlog(INFO, "Fetched token for %s", short_server_name->data());
+  fastlog(INFO,"Expiration (epoch):  %i", exp);
+  fastlog(INFO,"Expiration (human):  %s", localTimeString);
+  fastlog(INFO,"Expiration UTC (human)  %s", utcTimeString);
+
+  token_info_p->conn_token = (strlen(token.data())>0) ? token : rucio_invalid_token;
+  token_info_p->conn_token_exp = *gmtime(&exp);
+  token_info_p->conn_token_exp_epoch = exp;
+  pthread_exit(NULL);
+}
+
+std::string GET_OIDC_ASYNC(curlOIDCBundle& bundle, uid_t uid, pid_t calling_pid, std::string username, std::string short_server_name, token_info* token_info) {
+  fastlog(INFO, "Spliting of process for user %s (uid %d, pid %d)", 
+          username.c_str(), uid, calling_pid);
+  pid_t pid; 
+  void* args[6] = {&bundle, &uid, &calling_pid, &username, token_info, &short_server_name};
+  pthread_t child;
+  int result = pthread_create(&child, NULL, GET_OIDC_wrapper, args);
+  if (result) {
+    fastlog(ERROR, "return code from pthread_create() is %d\n", result);
   }
 
-  if(rucio_get_auth_token(short_server_name, uid, calling_pid, username) != TOKEN_OK){
-    fastlog(ERROR, "Cannot validate server %s auth settings.", conn_params->server_url.data());
-    return false;
-  }
-
-  return true;
+  return "";
 }
 
 
-// --- Base64 decoding table ---
-static const std::string base64_chars =
-    "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
-    "abcdefghijklmnopqrstuvwxyz"
-    "0123456789+/";
-
-// --- Base64URL decode ---
-std::string base64url_decode(std::string input) {
-    // Convert URL-safe → standard Base64
-    std::replace(input.begin(), input.end(), '-', '+');
-    std::replace(input.begin(), input.end(), '_', '/');
-
-    // Add padding
-    while (input.size() % 4) input += '=';
-
-    std::string output;
-    std::vector<int> T(256, -1);
-    for (int i = 0; i < 64; i++) T[base64_chars[i]] = i;
-
-    int val = 0, valb = -8;
-    for (unsigned char c : input) {
-        if (T[c] == -1) break;
-        val = (val << 6) + T[c];
-        valb += 6;
-        if (valb >= 0) {
-            output.push_back(char((val >> valb) & 0xFF));
-            valb -= 8;
-        }
-    }
-
-    return output;
-}
-
-// --- Extract exp ---
-std::int64_t get_token_expiry(const std::string& jwt) {
-    auto first_dot = jwt.find('.');
-    auto second_dot = jwt.find('.', first_dot + 1);
-
-    if (first_dot == std::string::npos || second_dot == std::string::npos) {
-        throw std::runtime_error("Invalid JWT format");
-    }
-
-    std::string payload = jwt.substr(first_dot + 1, second_dot - first_dot - 1);
-    std::string decoded = base64url_decode(payload);
-
-    auto json = nlohmann::json::parse(decoded);
-    return json["exp"].get<std::int64_t>();
-}
-
-int rucio_get_auth_token_oidc(const std::string& short_server_name, uid_t uid, pid_t calling_pid, std::string username){
+int rucio_get_auth_token_oidc(const std::string& short_server_name, uid_t uid, pid_t calling_pid, std::string username, bool async = true){
   
   auto conn_params = get_server_params(short_server_name);
 
@@ -102,8 +84,12 @@ int rucio_get_auth_token_oidc(const std::string& short_server_name, uid_t uid, p
 
   curlOIDCBundle* bundle = get_server_OIDC_bundle(short_server_name);
   std::string token;
-
-  token = GET_OIDC(*bundle, uid, calling_pid, username);
+  if (async){
+    token = GET_OIDC_ASYNC(*bundle, uid, calling_pid, username, short_server_name, get_server_token(short_server_name, uid));
+  }
+  else {
+    token = GET_OIDC(*bundle, uid, calling_pid, username);
+  }
   if (token.length() == 0)
   {
     return TOKEN_ERROR;
@@ -133,6 +119,18 @@ int rucio_get_auth_token_oidc(const std::string& short_server_name, uid_t uid, p
   token_info->conn_token_exp_epoch = exp;
 
   return TOKEN_OK;
+}
+
+int rucio_get_auth_token_root(const std::string& short_server_name, uid_t uid, pid_t calling_pid, std::string username){
+
+  auto conn_params = get_server_params(short_server_name);
+
+  switch (conn_params->rucio_auth_mode){
+    case auth_mode::userpass: return rucio_get_auth_token_userpass(short_server_name, uid, calling_pid, username);
+    case auth_mode::x509: return rucio_get_auth_token_x509(short_server_name, uid, calling_pid, username);
+    case auth_mode::oidc: return rucio_get_auth_token_oidc(short_server_name, uid, calling_pid, username, false);
+    default: return TOKEN_ERROR;
+  }
 }
 
 int rucio_get_auth_token(const std::string& short_server_name, uid_t uid, pid_t calling_pid, std::string username){
@@ -678,3 +676,19 @@ std::vector<std::string> rucio_get_replicas_metalinks(const std::string& path, u
   return std::move(pfns);
 }
 
+
+bool rucio_validate_server(const std::string& short_server_name, uid_t uid, pid_t calling_pid, std::string username){
+  auto conn_params = get_server_params(short_server_name);
+
+  if(not rucio_ping(short_server_name)){
+    fastlog(ERROR, "Server %s unreachable via network.", conn_params->server_url.data());
+    return false;
+  }
+
+  if(rucio_get_auth_token_root(short_server_name, uid, calling_pid, username) != TOKEN_OK){
+    fastlog(ERROR, "Cannot validate server %s auth settings.", conn_params->server_url.data());
+    return false;
+  }
+
+  return true;
+}

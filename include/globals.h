@@ -22,6 +22,7 @@ Authors:
 #include <utility>
 #include <map>
 #include "curl-REST.h"
+#include <nlohmann/json.hpp>
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 // Enumerator to define supported enum types
@@ -134,5 +135,55 @@ token_info* get_server_token(const std::string& server_name, uid_t uid);
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 void parse_settings_cfg(uid_t uid, pid_t calling_pid, std::string username, std::string ruciofs_settings_root = "./rucio-settings");
 bool check_permissions(const std::string& mountpoint_path);
+
+
+// --- Base64 decoding table ---
+static const std::string base64_chars =
+    "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+    "abcdefghijklmnopqrstuvwxyz"
+    "0123456789+/";
+
+// --- Base64URL decode ---
+inline std::string base64url_decode(std::string input) {
+    // Convert URL-safe → standard Base64
+    std::replace(input.begin(), input.end(), '-', '+');
+    std::replace(input.begin(), input.end(), '_', '/');
+
+    // Add padding
+    while (input.size() % 4) input += '=';
+
+    std::string output;
+    std::vector<int> T(256, -1);
+    for (int i = 0; i < 64; i++) T[base64_chars[i]] = i;
+
+    int val = 0, valb = -8;
+    for (unsigned char c : input) {
+        if (T[c] == -1) break;
+        val = (val << 6) + T[c];
+        valb += 6;
+        if (valb >= 0) {
+            output.push_back(char((val >> valb) & 0xFF));
+            valb -= 8;
+        }
+    }
+
+    return output;
+}
+// --- Extract exp ---
+inline std::int64_t get_token_expiry(const std::string& jwt) {
+    auto first_dot = jwt.find('.');
+    auto second_dot = jwt.find('.', first_dot + 1);
+
+    if (first_dot == std::string::npos || second_dot == std::string::npos) {
+        throw std::runtime_error("Invalid JWT format");
+    }
+
+    std::string payload = jwt.substr(first_dot + 1, second_dot - first_dot - 1);
+    std::string decoded = base64url_decode(payload);
+
+    auto json = nlohmann::json::parse(decoded);
+    return json["exp"].get<std::int64_t>();
+}
+
 
 #endif //RUCIO_FUSE_CONNNECTION_PARAMETERS_H

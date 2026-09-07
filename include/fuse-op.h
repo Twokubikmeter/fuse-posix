@@ -225,7 +225,7 @@ static int rucio_read(const char *path, char *buffer, size_t size, off_t offset,
       } else {
 //        printToPID(ctx->pid, "\nFile "+did+" @ "+server_name+" is not cached. Download started...\n");
         // If not downloaded yet, download file appending its infos to the download jobs queue
-        rucio_download_pipeline.append_new_download(rucio_download_info(did, path));
+        rucio_download_pipeline.append_new_download(rucio_download_info(did, path, uid, calling_pid, username));
         set_downloading(path);
         // Notify the file is not there (yet)
         return -EAGAIN;

@@ -28,7 +28,6 @@ bool rucio_ping(const std::string& short_server_name){
 
 void* GET_OIDC_wrapper(void* args)
 {
-  int pid = fork();
   void** argarray = reinterpret_cast<void**>(args);
   curlOIDCBundle* bundle = reinterpret_cast<curlOIDCBundle*>(argarray[0]);
 

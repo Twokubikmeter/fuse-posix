@@ -288,11 +288,11 @@ void structurize_container_did(const std::string& did_str, std::vector<rucio_did
 }
 
 void set_downloading(const std::string& path){
-  downloading_status_cache.emplace(path);
+  downloading_status_cache.emplace(path, 0);
 }
 
 bool is_downloading(const std::string& path){
-  return downloading_status_cache.find(path) != downloading_status_cache.end();
+  return downloading_status_cache.exists(path);
 }
 
 void set_downloaded(const std::string& path){

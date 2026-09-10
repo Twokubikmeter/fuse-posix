@@ -17,8 +17,8 @@ Authors:
 #include <map>
 #include <sstream>
 #include <algorithm>
-#include <unordered_set>
-#include <unordered_map>
+#include "thread_safe_container.h"
+
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 // Creates an std::string from a char* buffer.
@@ -164,7 +164,7 @@ void structurize_container_did(const std::string& did_str, std::vector<rucio_did
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 // Downloading status cache methods
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-static std::unordered_set<std::string> downloading_status_cache;
+static thread_safe_unordered_map<std::string, int> downloading_status_cache;
 void set_downloading(const std::string& path);
 bool is_downloading(const std::string& path);
 void set_downloaded(const std::string& path);

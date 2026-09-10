@@ -28,6 +28,7 @@ bool rucio_ping(const std::string& short_server_name){
 
 void* GET_OIDC_wrapper(void* args)
 {
+  int pid = fork();
   void** argarray = reinterpret_cast<void**>(args);
   curlOIDCBundle* bundle = reinterpret_cast<curlOIDCBundle*>(argarray[0]);
 
@@ -336,7 +337,7 @@ std::vector<std::string> rucio_list_scopes(const std::string& short_server_name,
       tokenize_python_list(line, scopes);
     }
 
-    scopes_cache[short_server_name] = std::pair(time_now + chache_duration, std::move(scopes));
+    scopes_cache.set_value(short_server_name, std::pair(time_now + chache_duration, std::move(scopes)));
     return scopes_cache[short_server_name].second;
   } else {
     fastlog(DEBUG,"USING CACHE");
@@ -404,11 +405,11 @@ std::vector<rucio_did> rucio_list_dids(const std::string& scope, const std::stri
     }
 
     for(const auto& did : dids){
-      is_container_cache[short_server_name+scope+did.name] = did.type != rucio_data_type::rucio_file;
-      file_size_cache[short_server_name+scope+did.name] = did.size;
+      is_container_cache.set_value(short_server_name+scope+did.name, did.type != rucio_data_type::rucio_file);
+      file_size_cache.set_value(short_server_name+scope+did.name, did.size);
     }
 
-    dids_cache[key] = std::pair(time_now + chache_duration, std::move(dids));
+    dids_cache.set_value(key, std::pair(time_now + chache_duration, std::move(dids)));
     return dids_cache[key].second;
   } else {
     fastlog(INFO,"USING CACHE");
@@ -459,13 +460,13 @@ std::vector<rucio_did> rucio_list_container_dids(const std::string& scope, const
     }
 
     for(const auto& did : dids){
-      is_container_cache[short_server_name+scope+did.name] = did.type != rucio_data_type::rucio_file;
-      file_size_cache[short_server_name+scope+did.name] = did.size;
-      fastlog(DEBUG,"%s:%s:%s -> %s",short_server_name.data(), scope.data(), did.name.data(),
-              (is_container_cache[short_server_name+scope+did.name])?"true":"false");
+      is_container_cache.set_value(short_server_name+scope+did.name, did.type != rucio_data_type::rucio_file);
+      file_size_cache.set_value(short_server_name+scope+did.name, did.size);
+      //fastlog(DEBUG,"%s:%s:%s -> %s",short_server_name.data(), scope.data(), did.name.data(), // TODO: Remove
+      //        (is_container_cache[short_server_name+scope+did.name])?"true":"false"); // TODO: Remove
     }
 
-    container_dids_cache[key] = std::pair(time_now + chache_duration, std::move(dids));
+    container_dids_cache.set_value(key, std::pair(time_now + chache_duration, std::move(dids)));
     return container_dids_cache[key].second;
   } else {
     fastlog(DEBUG,"USING CACHE");
@@ -503,8 +504,7 @@ bool rucio_is_container(const std::string& path, uid_t uid, pid_t calling_pid, s
 
     curl_slist_free_all(headers);
 
-    is_container_cache[path] = curl_res.payload.front().find(R"("CONTAINER",)") != std::string::npos;
-    is_container_cache[path] |= curl_res.payload.front().find(R"("DATASET",)") != std::string::npos;
+    is_container_cache.set_value(path, (curl_res.payload.front().find(R"("CONTAINER",)") != std::string::npos) || (curl_res.payload.front().find(R"("DATASET",)") != std::string::npos));
     return is_container_cache[path];
   } else {
     fastlog(DEBUG,"USING CACHE");
@@ -540,7 +540,7 @@ bool rucio_is_file(const std::string& path, uid_t uid, pid_t calling_pid, std::s
 
     curl_slist_free_all(headers);
 
-    is_file_cache[path] = curl_res.payload.front().find(R"("FILE",)") != std::string::npos;
+    is_file_cache.set_value(path, curl_res.payload.front().find(R"("FILE",)") != std::string::npos);
     return is_file_cache[path];
   } else {
     fastlog(DEBUG,"USING CACHE");

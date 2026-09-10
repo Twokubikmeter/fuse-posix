@@ -194,7 +194,7 @@ static int rucio_read(const char *path, char *buffer, size_t size, off_t offset,
   uid_t uid = ctx->uid;
   pid_t calling_pid = ctx->pid;
   std::string username = getpwuid(uid)->pw_name;
-  std::cout << "call from " << username << " " << calling_pid <<" in rucio_read" << std::endl; // TODO: Remove
+  std::cout << "call from " << username  << "(" << uid << ")"  << calling_pid <<" in rucio_read" << std::endl; // TODO: Remove
   if ( !is_root_path(path) ) {
     auto authenticationResult = authenticate_user(path, uid, calling_pid, username);
     if (authenticationResult != TOKEN_OK)
@@ -218,12 +218,12 @@ static int rucio_read(const char *path, char *buffer, size_t size, off_t offset,
 
       // If file is downloading avoid enqueue-ing it again
       if(is_downloading(path)){
-//        printToPID(ctx->pid, "\nFile "+did+" @ "+server_name+" is not cached and already downloading!\n");
+        //printToPID(ctx->pid, "\nFile "+did+" @ "+server_name+" is not cached and already downloading!\n");
         return -EINPROGRESS;
 
       // Otherwise download it
       } else {
-//        printToPID(ctx->pid, "\nFile "+did+" @ "+server_name+" is not cached. Download started...\n");
+        //printToPID(ctx->pid, "\nFile "+did+" @ "+server_name+" is not cached. Download started...\n");
         // If not downloaded yet, download file appending its infos to the download jobs queue
         rucio_download_pipeline.append_new_download(rucio_download_info(did, path, uid, calling_pid, username));
         set_downloading(path);

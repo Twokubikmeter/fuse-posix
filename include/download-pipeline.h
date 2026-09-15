@@ -53,6 +53,7 @@ struct rucio_downloader : public ELWD_Middle_Stage_I<rucio_download_info, rucio_
         } else {
           fastlog(ERROR, "Did %s maximum download attempts reached. Aborting!", output->fdid.data());
           fOutputQ->append(*output);
+          //rucio_download_cache.add_file()
         }
       }
     }

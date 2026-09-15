@@ -62,6 +62,10 @@ std::string*  get_server_config(const std::string& server_name){
   return (server_exists(server_name)) ? &rucio_server_map[server_name].config_file_path : nullptr;
 }
 
+std::string* get_temp_config_folder(const std::string& server_name){
+  return (server_exists(server_name)) ? &rucio_server_map[server_name].temp_config_folder : nullptr;
+}
+
 // Useful method to extract values from rucio.cfg-like files
 std::string get_cfg_value(std::string& line){
   line.erase(std::remove(line.begin(), line.end(), ' '), line.end());
@@ -73,6 +77,7 @@ curlOIDCBundle* get_server_OIDC_bundle(const std::string& server_name){
 
   auto bundle = new curlOIDCBundle;
   bundle->config_file = rucio_server_map[server_name].config_file_path;
+  bundle->temp_config_folder = get_temp_config_folder(server_name);
 
   std::ifstream settings_file;
   settings_file.open(rucio_server_map[server_name].config_file_path.data());
@@ -223,8 +228,12 @@ void parse_settings_cfg(uid_t uid, pid_t calling_pid, std::string username, std:
               oidc_polling = get_cfg_value(line);
             }
 
-            if (line.rfind("", 0) == 0){
+            if (line.rfind("oidc_refresh", 0) == 0){
               auth_oidc_refresh_activate = get_cfg_value(line);
+            }
+
+            if (line.rfind("temp_config_folder", 0) == 0){
+              srv.temp_config_folder = get_cfg_value(line);
             }
           }
 

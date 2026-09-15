@@ -85,6 +85,7 @@ struct curlOIDCBundle{
     std::string oidc_username;
     std::string oidc_password;
     std::string config_file;
+    std::string* temp_config_folder;
 };
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////

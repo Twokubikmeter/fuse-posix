@@ -128,36 +128,6 @@ std::string GET_OIDC(curlOIDCBundle& bundle, uid_t uid, pid_t calling_pid, std::
       close(slave_fd);
     }
     
-    struct passwd *pwd = getpwuid(uid);
-    if (!pwd) {
-      fastlog(ERROR, "User %d not found", uid);
-      exit(1);
-    }
-    
-    // Initialize groups BEFORE setuid
-    if (initgroups(pwd->pw_name, pwd->pw_gid) == -1) {
-      fastlog(ERROR, "initgroups failed: %s", strerror(errno));
-    }
-    
-    // Switch user
-    if (setgid(pwd->pw_gid) == -1) {
-      fastlog(ERROR, "setgid failed: %s", strerror(errno));
-      exit(1);
-    }
-    
-    if (setuid(uid) == -1) {
-      fastlog(ERROR, "setuid failed: %s", strerror(errno));
-      exit(1);
-    }
-    
-    // Set environment as the user
-    setenv("HOME", pwd->pw_dir, 1);
-    setenv("USER", pwd->pw_name, 1);
-    setenv("LOGNAME", pwd->pw_name, 1);
-    setenv("SHELL", pwd->pw_shell, 1);
-    setenv("PATH", "/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin", 1);
-    
-    chdir(pwd->pw_dir);
     
     // TODO: Find rucio - should work now that we're the user
     //std::string rucio_path = find_rucio_executable();
@@ -165,16 +135,21 @@ std::string GET_OIDC(curlOIDCBundle& bundle, uid_t uid, pid_t calling_pid, std::
     if (rucio_path.empty()) {
       rucio_path = "/usr/bin/rucio";  // fallback
     }
+    std::string new_cfg;
+    fastlog(INFO, "original config %s", bundle.config_file.c_str());
+    fastlog(INFO, "temp folder %s", (*bundle.temp_config_folder).c_str());
+    new_cfg = copyConfig(bundle.config_file, *bundle.temp_config_folder, username);
+    
     
     const char *argv[] = {
       rucio_path.c_str(),
       "--config",
-      bundle.config_file.c_str(),
+      new_cfg.c_str(),
       "whoami",
       nullptr
     };
     
-    fastlog(INFO, "Executing %s as uid %d", rucio_path.c_str(), getuid());
+    fastlog(INFO, "Executing %s using %s", rucio_path.c_str(), new_cfg.c_str());
     execv(rucio_path.c_str(), (char * const *)argv);
     
     fastlog(ERROR, "Failed to execute rucio: %s", strerror(errno));
@@ -199,7 +174,7 @@ std::string GET_OIDC(curlOIDCBundle& bundle, uid_t uid, pid_t calling_pid, std::
   }
   
   // Read token from user's location
-  std::string token_path = "/tmp/" + username + "/.rucio_" + username + "/auth_token_for_default_account";
+  std::string token_path = *bundle.temp_config_folder + username + ".token";
   fastlog(INFO, "Token path: %s", token_path.c_str());
 
 

@@ -84,6 +84,7 @@ struct rucio_server{
   connection_parameters rucio_conn_params;
   std::map<uid_t, token_info> rucio_token_infos;
   std::string config_file_path;
+  std::string temp_config_folder;
 
   rucio_server():rucio_conn_params("","","","",""), rucio_token_infos(){};
 
@@ -120,8 +121,9 @@ bool scope_exists(const std::string &server_name, const std::string &scope, uid_
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 // Methods to get server configs and params. Wrapped around the caches to protect against non existing servers.
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-connection_parameters*  get_server_params(const std::string& server_name);
-std::string*  get_server_config(const std::string& server_name);
+connection_parameters* get_server_params(const std::string& server_name);
+std::string* get_server_config(const std::string& server_name);
+std::string* get_temp_config_folder(const std::string& server_name);
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 // Methods to retrieve authentication information
@@ -185,5 +187,39 @@ inline std::int64_t get_token_expiry(const std::string& jwt) {
     return json["exp"].get<std::int64_t>();
 }
 
+#include <filesystem>
+#include <fstream>
+#include <stdexcept>
+
+inline std::string copyConfig(const std::filesystem::path& source,
+                     const std::string destination_folder,
+                     const std::string& user)
+{
+    std::filesystem::path destination =
+        destination_folder +
+        (source.stem().string() + "_" + user + source.extension().string());
+
+    if (std::filesystem::exists(destination)) {
+        return destination.string();
+    }
+
+    if (!std::filesystem::copy_file(
+            source,
+            destination,
+            std::filesystem::copy_options::overwrite_existing))
+    {
+        throw std::runtime_error("Failed to copy file");
+    }
+
+    std::ofstream out(destination, std::ios::app);
+    if (!out) {
+        throw std::runtime_error("Failed to open destination file");
+    }
+    std::string token_path = destination_folder + user + ".token";
+
+    out << '\n' << "auth_token_file_path = " << token_path << '\n';
+
+    return destination.string();
+}
 
 #endif //RUCIO_FUSE_CONNNECTION_PARAMETERS_H

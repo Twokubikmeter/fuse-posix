@@ -49,9 +49,11 @@ static int rucio_getattr (const char *path, struct stat *st){
   std::string username = getpwuid(uid)->pw_name;
   std::cout << "call from " << username << " " << calling_pid << " in rucio_getattr" << std::endl; // TODO: Remove
   if ( !is_root_path(path) ) {
+    fastlog(INFO, "line zero");
     auto authenticationResult = authenticate_user(path, uid, calling_pid, username);
     if (authenticationResult != TOKEN_OK)
     {
+      fastlog(INFO, "line three");
       return -EACCES;
     }
   }
@@ -199,9 +201,12 @@ static int rucio_read(const char *path, char *buffer, size_t size, off_t offset,
     auto authenticationResult = authenticate_user(path, uid, calling_pid, username);
     if (authenticationResult != TOKEN_OK)
     {
+      fastlog(INFO, "line four"); // TODO: Remove
       return -EACCES;
     }
   }
+
+  fastlog(INFO, "line five"); // TODO: Remove
   
   // If path is not a directory hendle the file
   if(not is_server_mountpoint(path) and not is_main_scope(path) and not rucio_is_container(path, uid, calling_pid, username)){
@@ -210,6 +215,7 @@ static int rucio_read(const char *path, char *buffer, size_t size, off_t offset,
     std::string cache_root = rucio_cache_path + "/" + server_name + "/" + extract_scope(path);
     std::string cache_path = cache_root + "/" + extract_name(path);
 
+    fastlog(INFO, "line six"); // TODO: Remove
     // Check if file has been downloaded already and cached
     // TODO: MAJN: Make sure to see if the file needs to be reloaded maybe. 
     if(not rucio_download_cache.is_cached(cache_path)) {
@@ -230,21 +236,27 @@ static int rucio_read(const char *path, char *buffer, size_t size, off_t offset,
         // Notify the file is not there (yet)
         return -EAGAIN;
       }
+      fastlog(INFO, "line seven"); // TODO: Remove
     } else {
       set_downloaded(path);
     }
+    fastlog(INFO, "line eight"); // TODO: Remove
   
     // Getting the file from cache and retrieving its size
     // TODO: cache file sizes!
     FILE* file = rucio_download_cache.get_file(cache_path);
     off_t file_size = rucio_get_size(path, uid, calling_pid, username);
 
+    fastlog(INFO, "line nine"); // TODO: Remove
     // Avoid going over end of file
     if (offset > file_size) return 0;
 
+    fastlog(INFO, "line ten"); // TODO: Remove
     // Apply offset to file and fread into buffer the requested number of bytes
     fseeko(file, offset, SEEK_SET);
+    fastlog(INFO, "line eleven"); // TODO: Remove
     fread(buffer, sizeof(char), size, file);
+    fastlog(INFO, "line twelve"); // TODO: Remove
     return std::min(size , (size_t)(file_size - offset));
   }
   return -1;

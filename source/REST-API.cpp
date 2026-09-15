@@ -606,7 +606,13 @@ int authenticate_user(const std::string &path, uid_t uid, pid_t calling_pid, std
   if (is_token_valid) {
     return TOKEN_OK;
   }
+  fastlog(INFO, "line one");
   auto conn_params = get_server_params(short_server_name);
+  fastlog(INFO, "line two");
+  if (not conn_params)
+  {
+    return SERVER_NOT_LOADED;
+  }
 
   switch (conn_params->rucio_auth_mode){
     case auth_mode::userpass: return rucio_get_auth_token_userpass(short_server_name, uid, calling_pid, username);
